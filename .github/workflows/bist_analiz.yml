@@ -1,0 +1,30 @@
+name: Sıfırdan BIST Analiz ve Tahmin
+
+on:
+  schedule:
+    # Hafta içi her gün TSİ 18:15'te otomatik çalışır
+    - cron: '15 15 * * 1-5'
+  workflow_dispatch: # Telefondan manuel tetikleme
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Bağımlılıkları Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Scripti Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
