@@ -1,3 +1,4 @@
-borsapy
-pandas
 requests
+beautifulsoup4
+pandas
+pandas_ta
