@@ -16,8 +16,8 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def get_bist_data_zero(symbol):
-    """Yahoo Finance API üzerinden sıfırdan BİST verisi çeker"""
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.IS?range=3mo&interval=1d"
+    """Yahoo Finance API üzerinden BİST verisi çeker"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.IS?range=6mo&interval=1d"
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     res = requests.get(url, headers=headers, timeout=10)
@@ -51,57 +51,24 @@ def get_bist_news_zero():
     except Exception as e:
         return [f"Haber çekilemedi: {e}"]
 
-def analiz_ve_tahmin_yap():
-    # 1. Köklü BİST Hisseleri
-    ana_hisseler = ["THYAO", "GARAN", "EREGL", "ASELS", "TUPRS", "KCHOL"]
-    
-    # 2. BİST Yeni Halka Arz / Yakın Zaman Halka Arz Hisseleri
-    # (Örnek: BINBN, KOCMT, MHRGY, BEGYO, ENERY, TABGD - Takip etmek istediğiniz yeni tahtaları buraya ekleyebilirsiniz)
-    halka_arzlar = ["BINBN", "BEGYO", "ENERY", "TABGD", "SURGY"]
-    
-    rapor = "📊 **SIFIRDAN BİST PİYASA & TAHMİN RAPORU** 📊\n\n"
-    
-    # --- ANA HİSSELER ANALİZİ ---
-    rapor += "📈 **KÖKLÜ BİST HİSSELERİ**\n"
-    for symbol in ana_hisseler:
-        rapor += hisse_analiz_et(symbol)
-        
-    # --- YENİ HALKA ARZ TAHTALARI ANALİZİ ---
-    rapor += "🆕 **YENİ HALKA ARZ TAHTALARI**\n"
-    for symbol in halka_arzlar:
-        rapor += hisse_analiz_et(symbol, is_halka_arz=True)
-            
-    # --- PİYASA HABERLERİ ---
-    rapor += "📰 **SON PİYASA BAŞLIKLARI**\n"
-    haberler = get_bist_news_zero()
-    for h in haberler:
-        rapor += f"• {h}\n"
-        
-    print(rapor)
-    
-    # Telegram Gönderimi
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": rapor, "parse_mode": "Markdown"})
-
-def hisse_analiz_et(symbol, is_halka_arz=False):
+def hisse_analiz_et(symbol):
     try:
         df = get_bist_data_zero(symbol)
         
         if df.empty or len(df) < 5:
-            return f"🔹 **{symbol}**: Veri henüz yetersiz (Çok yeni halka arz olabilir)\n\n"
+            return f"🔹 **{symbol}**: Veri bulunamadı veya henüz yetersiz.\n\n"
             
         son_fiyat = df["Close"].iloc[-1]
         onceki_fiyat = df["Close"].iloc[-2]
         hacim_son = df["Volume"].iloc[-1]
         
-        # Hacim ortalaması için mevcut veri kadar periyot kullan
+        # Hacim ortalaması
         hacim_periyot = min(len(df), 10)
         hacim_ort = df["Volume"].tail(hacim_periyot).mean()
         
         degisim = ((son_fiyat - onceki_fiyat) / onceki_fiyat) * 100
         
-        # Göstergeler (Veri uzunluğuna göre esnek hesaplama)
+        # Göstergeler
         rsi_val = None
         if len(df) >= 15:
             df["RSI"] = calculate_rsi(df["Close"], period=14)
@@ -112,7 +79,7 @@ def hisse_analiz_et(symbol, is_halka_arz=False):
         
         hacim_durum = "🔥 Yüksek Hacim" if hacim_son > (hacim_ort * 1.3) else "💤 Normal Hacim"
         
-        # Yön ve Tahmin Algoritması (Öncelik RSI ve Aşırı Satım/Alım Tepkisi)
+        # Yön ve Tahmin Algoritması
         if rsi_val is not None and rsi_val < 30:
             tahmin = "🚀 AŞIRI SATIM (Tepki Yükselişi / AL Sinyali Potansiyeli)"
         elif rsi_val is not None and rsi_val > 70:
@@ -136,6 +103,38 @@ def hisse_analiz_et(symbol, is_halka_arz=False):
         
     except Exception as e:
         return f"❌ {symbol} çekilemedi: {e}\n\n"
+
+def analiz_ve_tahmin_yap():
+    # 1. Köklü BİST Hisseleri
+    ana_hisseler = ["THYAO", "GARAN", "EREGL", "ASELS", "TUPRS", "KCHOL"]
+    
+    # 2. 50 Günü Geçmiş Yeni Halka Arz Tahtaları
+    halka_arzlar = ["KARCL", "MASFN", "METEN", "SSAAT", "SARAE", "ALBTN"]
+    
+    rapor = "📊 **SIFIRDAN BİST PİYASA & TAHMİN RAPORU** 📊\n\n"
+    
+    # --- ANA HİSSELER ANALİZİ ---
+    rapor += "📈 **KÖKLÜ BİST HİSSELERİ**\n"
+    for symbol in ana_hisseler:
+        rapor += hisse_analiz_et(symbol)
+        
+    # --- YENİ HALKA ARZ TAHTALARI ANALİZİ ---
+    rapor += "🆕 **YENİ HALKA ARZ TAHTALARI (50+ GÜN)**\n"
+    for symbol in halka_arzlar:
+        rapor += hisse_analiz_et(symbol)
+            
+    # --- PİYASA HABERLERİ ---
+    rapor += "📰 **SON PİYASA BAŞLIKLARI**\n"
+    haberler = get_bist_news_zero()
+    for h in haberler:
+        rapor += f"• {h}\n"
+        
+    print(rapor)
+    
+    # Telegram Gönderimi
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": rapor, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
     analiz_ve_tahmin_yap()
