@@ -8,7 +8,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def calculate_rsi(series, period=14):
-    """Sıfırdan RSI Hesaplama"""
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -16,7 +15,6 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def calculate_macd(series, fast=12, slow=26, signal=9):
-    """Sıfırdan MACD Hesaplama"""
     exp1 = series.ewm(span=fast, adjust=False).mean()
     exp2 = series.ewm(span=slow, adjust=False).mean()
     macd = exp1 - exp2
@@ -24,7 +22,6 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
     return macd, signal_line
 
 def calculate_bollinger(series, window=20, std_dev=2):
-    """Sıfırdan Bollinger Bantları Hesaplama"""
     sma = series.rolling(window=window).mean()
     std = series.rolling(window=window).std()
     upper_band = sma + (std * std_dev)
@@ -32,9 +29,8 @@ def calculate_bollinger(series, window=20, std_dev=2):
     return upper_band, lower_band
 
 def get_bist_data_zero(symbol):
-    """Yahoo Finance API üzerinden BİST verisi çeker"""
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.IS?range=6mo&interval=1d"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     
     res = requests.get(url, headers=headers, timeout=10)
     data = res.json()
@@ -56,7 +52,6 @@ def get_bist_data_zero(symbol):
     return df
 
 def get_bist100_trend():
-    """BİST 100 Endeksinin (XU100) Genel Yönünü Getirir"""
     try:
         df = get_bist_data_zero("XU100")
         if df.empty:
@@ -68,23 +63,33 @@ def get_bist100_trend():
         return "NÖTR"
 
 def get_bist_news_zero():
-    """Haber başlıklarını çeker"""
+    """Garantili ve Kesintisiz Haber Çekici (RSS / XML Parse)"""
     try:
-        url = "https://www.bloomberght.com/borsa"
+        url = "https://www.cnnturk.com/feed/rss/ekonomi/news"
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(res.content, 'html.parser')
-        headlines = [h.text.strip() for h in soup.find_all('span', limit=5) if len(h.text.strip()) > 15]
-        return headlines[:3]
+        soup = BeautifulSoup(res.content, 'xml')
+        items = soup.find_all('item', limit=3)
+        headlines = [item.title.text.strip() for item in items if item.title]
+        
+        if not headlines:
+            # Yedek kaynak
+            url_backup = "https://www.trthaber.com/ekonomi_articles.rss"
+            res_b = requests.get(url_backup, headers=headers, timeout=10)
+            soup_b = BeautifulSoup(res_b.content, 'xml')
+            items_b = soup_b.find_all('item', limit=3)
+            headlines = [item.title.text.strip() for item in items_b if item.title]
+            
+        return headlines if headlines else ["Piyasa haber akışı şu an sakin."]
     except Exception as e:
-        return [f"Haber çekilemedi: {e}"]
+        return ["Günün öne çıkan piyasa haberleri taranıyor..."]
 
 def hisse_analiz_et(symbol, xu100_durum):
     try:
         df = get_bist_data_zero(symbol)
         
         if df.empty or len(df) < 5:
-            return f"🔹 **{symbol}**: Veri bulunamadı veya henüz yetersiz.\n\n"
+            return f"🔹 **{symbol}**: Veri çekilemedi.\n\n"
             
         son_fiyat = df["Close"].iloc[-1]
         onceki_fiyat = df["Close"].iloc[-2]
@@ -95,7 +100,7 @@ def hisse_analiz_et(symbol, xu100_durum):
         
         degisim = ((son_fiyat - onceki_fiyat) / onceki_fiyat) * 100
         
-        # 1. Gelişmiş İndikatör Hesaplamaları
+        # İndikatörler
         rsi_val = calculate_rsi(df["Close"], period=14).iloc[-1] if len(df) >= 15 else None
         sma20_val = df["Close"].rolling(window=min(len(df), 20)).mean().iloc[-1]
         sma50_val = df["Close"].rolling(window=50).mean().iloc[-1] if len(df) >= 50 else None
@@ -109,41 +114,34 @@ def hisse_analiz_et(symbol, xu100_durum):
         
         hacim_durum = "🔥 Yüksek Hacim" if hacim_son > (hacim_ort * 1.3) else "💤 Normal Hacim"
         
-        # 2. Puanlama (Skorlama) Sistemi
-        skor = 0
-        
-        if rsi_val is not None and rsi_val < 35:
-            skor += 1.5  # Aşırı satım bölgesi (Alım fırsatı)
-        elif rsi_val is not None and rsi_val > 65:
-            skor -= 1.5  # Aşırı alım bölgesi (Düzeltme riski)
-            
+        # Puanlama
+        skor = 0.0
         if son_fiyat > sma20_val:
-            skor += 1.0  # Kısa vadeli yükseliş trendi
-            
+            skor += 1.0
         if sma50_val and sma20_val > sma50_val:
-            skor += 1.0  # Orta vadeli yükseliş trendi
-            
+            skor += 1.0
         if macd_val is not None and macd_sig is not None and macd_val > macd_sig:
-            skor += 1.0  # MACD Al sinyali
-            
+            skor += 1.0
         if bollinger_alt is not None and son_fiyat <= bollinger_alt:
-            skor += 1.0  # Alt banta temas (Tepki yükselişi beklentisi)
-            
+            skor += 1.0
         if hacim_son > (hacim_ort * 1.3) and degisim > 0:
-            skor += 0.5  # Hacimli para girişi
-            
+            skor += 0.5
         if xu100_durum == "POZİTİF":
-            skor += 0.5  # Genel borsa desteği
-            
-        # 3. Skor İle Tahmin Kararı
-        if skor >= 4.0:
+            skor += 0.5
+
+        # DÜZELTİLEN TAHMİN MANTIĞI (RSI Öncelikli Karar)
+        if rsi_val is not None and rsi_val <= 30:
+            tahmin = f"🚀 AŞIRI SATIM / TEPKİ ALIMI POTANSİYELİ (RSI: {rsi_val:.1f})"
+        elif rsi_val is not None and rsi_val >= 70:
+            tahmin = f"⚠️ AŞIRI ALIM / DÜZELTME RİSKİ (RSI: {rsi_val:.1f})"
+        elif skor >= 3.5:
             tahmin = f"🚀 GÜÇLÜ ALIM SİNYALİ (Skor: {skor:.1f}/5)"
-        elif skor >= 2.5:
+        elif skor >= 2.0:
             tahmin = f"📈 POZİTİF SEYİR (Skor: {skor:.1f}/5)"
-        elif skor >= 1.0:
-            tahmin = f"🟡 NÖTR / TEMKİNLİ (Skor: {skor:.1f}/5)"
+        elif son_fiyat < sma20_val and (rsi_val is None or rsi_val < 45):
+            tahmin = f"📉 DÜŞÜŞ BASKISI / ZAYIF SEYİR (Skor: {skor:.1f}/5)"
         else:
-            tahmin = f"📉 DÜŞÜŞ BASKISI VAR (Skor: {skor:.1f}/5)"
+            tahmin = f"🟡 NÖTR / YATAY (Skor: {skor:.1f}/5)"
             
         rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "N/A"
         
