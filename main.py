@@ -55,15 +55,14 @@ def get_bist100_trend():
     try:
         df = get_bist_data_zero("XU100")
         if df.empty:
-            return "NÖTR"
+            return "Piyasa Yönü Belirsiz 🟡"
         son_fiyat = df["Close"].iloc[-1]
         sma20 = df["Close"].rolling(window=20).mean().iloc[-1]
-        return "POZİTİF" if son_fiyat > sma20 else "NEGATİF"
+        return "Borsa Olumlu (Yükseliş Trendi) 🟢" if son_fiyat > sma20 else "Borsa Olumsuz (Düşüş Baskısı) 🔴"
     except:
-        return "NÖTR"
+        return "Piyasa Yönü Belirsiz 🟡"
 
 def get_bist_news_zero():
-    """Garantili ve Kesintisiz Haber Çekici (RSS / XML Parse)"""
     try:
         url = "https://www.cnnturk.com/feed/rss/ekonomi/news"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -73,7 +72,6 @@ def get_bist_news_zero():
         headlines = [item.title.text.strip() for item in items if item.title]
         
         if not headlines:
-            # Yedek kaynak
             url_backup = "https://www.trthaber.com/ekonomi_articles.rss"
             res_b = requests.get(url_backup, headers=headers, timeout=10)
             soup_b = BeautifulSoup(res_b.content, 'xml')
@@ -84,70 +82,85 @@ def get_bist_news_zero():
     except Exception as e:
         return ["Günün öne çıkan piyasa haberleri taranıyor..."]
 
+def net_karar_ver(son_fiyat, sma20_val, sma50_val, macd_val, macd_sig, bollinger_alt, hacim_son, hacim_ort, degisim, xu100_durum, rsi_val):
+    # Dışarıya karmaşık terim sunmadan sadece Karar Metni döndürür
+    skor = 0.0
+    if son_fiyat > sma20_val:
+        skor += 1.0
+    if sma50_val and sma20_val > sma50_val:
+        skor += 1.0
+    if macd_val is not None and macd_sig is not None and macd_val > macd_sig:
+        skor += 1.0
+    if bollinger_alt is not None and son_fiyat <= bollinger_alt:
+        skor += 1.0
+    if hacim_son > (hacim_ort * 1.3) and degisim > 0:
+        skor += 0.5
+    if "Olumlu" in xu100_durum:
+        skor += 0.5
+
+    # Doğrudan AL / SAT Sinyalleri
+    if rsi_val is not None and rsi_val <= 30:
+        return "🚀 GÜÇLÜ AL (Çok Düşmüş, Tepki Yükselişi Bekleniyor)"
+    elif rsi_val is not None and rsi_val >= 70:
+        return "⚠️ SAT / DÜZELTME RİSKİ (Çok Şişmiş)"
+    elif skor >= 3.5:
+        return "🟢 AL (Yükseliş Trendinde)"
+    elif skor >= 2.0:
+        return "↗️ TUT / POZİTİF (Kazanım Korunabilir)"
+    elif son_fiyat < sma20_val and (rsi_val is None or rsi_val < 45):
+        return "🔴 SAT / UZAK DUR (Düşüş Trendinde)"
+    else:
+        return "🟡 BEKLE / NÖTR (Net Yön Yok)"
+
 def hisse_analiz_et(symbol, xu100_durum):
     try:
         df = get_bist_data_zero(symbol)
         
-        if df.empty or len(df) < 5:
-            return f"🔹 **{symbol}**: Veri çekilemedi.\n\n"
+        if df.empty or len(df) < 15:
+            return f"🔹 **{symbol}**: Veri bulunamadı.\n\n"
             
         son_fiyat = df["Close"].iloc[-1]
-        onceki_fiyat = df["Close"].iloc[-2]
-        hacim_son = df["Volume"].iloc[-1]
+        dunku_fiyat = df["Close"].iloc[-2]
         
-        hacim_periyot = min(len(df), 10)
-        hacim_ort = df["Volume"].tail(hacim_periyot).mean()
+        degisim_1g = ((son_fiyat - dunku_fiyat) / dunku_fiyat) * 100
         
-        degisim = ((son_fiyat - onceki_fiyat) / onceki_fiyat) * 100
-        
-        # İndikatörler
-        rsi_val = calculate_rsi(df["Close"], period=14).iloc[-1] if len(df) >= 15 else None
-        sma20_val = df["Close"].rolling(window=min(len(df), 20)).mean().iloc[-1]
-        sma50_val = df["Close"].rolling(window=50).mean().iloc[-1] if len(df) >= 50 else None
-        
-        upper_band, lower_band = calculate_bollinger(df["Close"])
-        bollinger_alt = lower_band.iloc[-1] if len(df) >= 20 else None
-        
-        macd_line, signal_line = calculate_macd(df["Close"])
-        macd_val = macd_line.iloc[-1] if len(df) >= 26 else None
-        macd_sig = signal_line.iloc[-1] if len(df) >= 26 else None
-        
-        hacim_durum = "🔥 Yüksek Hacim" if hacim_son > (hacim_ort * 1.3) else "💤 Normal Hacim"
-        
-        # Puanlama
-        skor = 0.0
-        if son_fiyat > sma20_val:
-            skor += 1.0
-        if sma50_val and sma20_val > sma50_val:
-            skor += 1.0
-        if macd_val is not None and macd_sig is not None and macd_val > macd_sig:
-            skor += 1.0
-        if bollinger_alt is not None and son_fiyat <= bollinger_alt:
-            skor += 1.0
-        if hacim_son > (hacim_ort * 1.3) and degisim > 0:
-            skor += 0.5
-        if xu100_durum == "POZİTİF":
-            skor += 0.5
-
-        # DÜZELTİLEN TAHMİN MANTIĞI (RSI Öncelikli Karar)
-        if rsi_val is not None and rsi_val <= 30:
-            tahmin = f"🚀 AŞIRI SATIM / TEPKİ ALIMI POTANSİYELİ (RSI: {rsi_val:.1f})"
-        elif rsi_val is not None and rsi_val >= 70:
-            tahmin = f"⚠️ AŞIRI ALIM / DÜZELTME RİSKİ (RSI: {rsi_val:.1f})"
-        elif skor >= 3.5:
-            tahmin = f"🚀 GÜÇLÜ ALIM SİNYALİ (Skor: {skor:.1f}/5)"
-        elif skor >= 2.0:
-            tahmin = f"📈 POZİTİF SEYİR (Skor: {skor:.1f}/5)"
-        elif son_fiyat < sma20_val and (rsi_val is None or rsi_val < 45):
-            tahmin = f"📉 DÜŞÜŞ BASKISI / ZAYIF SEYİR (Skor: {skor:.1f}/5)"
+        # 10 Günlük Trend
+        if len(df) >= 11:
+            fiyat_10g = df["Close"].iloc[-11]
+            degisim_10g = ((son_fiyat - fiyat_10g) / fiyat_10g) * 100
+            trend_10g = f"%{degisim_10g:+.2f}"
         else:
-            tahmin = f"🟡 NÖTR / YATAY (Skor: {skor:.1f}/5)"
+            trend_10g = "Yeni Tahta"
             
-        rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "N/A"
+        hacim_son = df["Volume"].iloc[-1]
+        hacim_ort = df["Volume"].tail(10).mean()
         
-        out = f"🔹 **{symbol}**: {son_fiyat:.2f} TL (%{degisim:+.2f})\n"
-        out += f"   • RSI: {rsi_str} | Hacim: {hacim_durum}\n"
-        out += f"   • Tahmin: {tahmin}\n\n"
+        # İndikatör Hesaplamaları (Gizli Arka Planda)
+        df["RSI"] = calculate_rsi(df["Close"], period=14)
+        sma20 = df["Close"].rolling(window=min(len(df), 20)).mean()
+        sma50 = df["Close"].rolling(window=50).mean() if len(df) >= 50 else pd.Series([None]*len(df))
+        upper_b, lower_b = calculate_bollinger(df["Close"])
+        macd_l, macd_s = calculate_macd(df["Close"])
+        
+        # Bugünki Karar
+        karar_bugun = net_karar_ver(
+            son_fiyat, sma20.iloc[-1], sma50.iloc[-1], macd_l.iloc[-1], macd_s.iloc[-1],
+            lower_b.iloc[-1] if len(df)>=20 else None, hacim_son, hacim_ort, degisim_1g, xu100_durum, df["RSI"].iloc[-1]
+        )
+        
+        # Dünkü Karar
+        degisim_dun = ((dunku_fiyat - df["Close"].iloc[-3]) / df["Close"].iloc[-3]) * 100 if len(df)>=3 else 0
+        karar_dun = net_karar_ver(
+            dunku_fiyat, sma20.iloc[-2], sma50.iloc[-2], macd_l.iloc[-2], macd_s.iloc[-2],
+            lower_b.iloc[-2] if len(df)>=21 else None, df["Volume"].iloc[-2], hacim_ort, degisim_dun, xu100_durum, df["RSI"].iloc[-2]
+        )
+        
+        # SADELEŞTİRİLMİŞ ÇIKTI
+        out = f"🔹 **{symbol}**: {son_fiyat:.2f} TL (%{degisim_1g:+.2f})\n"
+        out += f"   • **Bugünkü Karar:** {karar_bugun}\n"
+        out += f"   • **Dünkü Karar:** {karar_dun}\n"
+        out += f"   • **10 Günlük Trend:** {trend_10g}\n\n"
+        
         return out
         
     except Exception as e:
@@ -159,18 +172,18 @@ def analiz_ve_tahmin_yap():
     
     xu100_durum = get_bist100_trend()
     
-    rapor = "📊 **BİST ÇOKLU ANALİZ VE TAHMİN RAPORU** 📊\n"
-    rapor += f"🏛 **BİST 100 Genel Trendi:** {xu100_durum}\n\n"
+    rapor = "📊 **BİST AL / SAT SİNYAL RAPORU** 📊\n"
+    rapor += f"🏛 **Genel Borsa Durumu:** {xu100_durum}\n\n"
     
     rapor += "📈 **KÖKLÜ BİST HİSSELERİ**\n"
     for symbol in ana_hisseler:
         rapor += hisse_analiz_et(symbol, xu100_durum)
         
-    rapor += "🆕 **YENİ HALKA ARZ TAHTALARI (50+ GÜN)**\n"
+    rapor += "🆕 **YENİ HALKA ARZ TAHTALARI**\n"
     for symbol in halka_arzlar:
         rapor += hisse_analiz_et(symbol, xu100_durum)
             
-    rapor += "📰 **SON PİYASA BAŞLIKLARI**\n"
+    rapor += "📰 **ÖNE ÇIKAN BİST HABERLERİ**\n"
     haberler = get_bist_news_zero()
     for h in haberler:
         rapor += f"• {h}\n"
